@@ -59,7 +59,7 @@ The server will start, and log messages will indicate if the GeoIP database was 
 
 ## Docker
 
-A pre-built Docker image is available on Docker Hub: `ali-issa/ip-lookup`.
+A pre-built Docker image is available on Docker Hub: `issaali/ip-lookup`.
 The image is based on Alpine Linux and uses the binary from the GitHub releases.
 
 The `ip-lookup` Docker container expects the GeoLite2 database to be available at `/geoipdb/GeoLite2-City.mmdb` by default. This path is configurable via the `GEOIP_DB_PATH` environment variable if needed.
@@ -89,7 +89,7 @@ Here’s how to set it up:
 
       ip-lookup:
         container_name: ip-lookup
-        image: ali-issa/ip-lookup:latest # Or a specific version
+        image: issaali/ip-lookup:latest # Or a specific version
         restart: unless-stopped
         depends_on:
           - geoipupdate
