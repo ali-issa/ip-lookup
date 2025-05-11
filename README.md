@@ -38,6 +38,11 @@ The service is configured using environment variables:
 - `LISTEN_ADDR`: (Optional) The address and port on which the server should listen.
   - Defaults to `:8080`.
   - Example: `export LISTEN_ADDR=":9000"`
+- `ALLOWED_CORS_ORIGINS`: (Optional) A comma-separated list of origins that are allowed to make cross-origin requests.
+  - If not set, or if the request's `Origin` header doesn't match any in the list, CORS headers will not be added, and browsers may block cross-origin requests.
+  - To allow all origins (use with caution, especially in production), set it to `*`.
+  - Example for specific origins: `export ALLOWED_CORS_ORIGINS="http://localhost:3000,https://yourfrontend.com"`
+  - Example to allow all: `export ALLOWED_CORS_ORIGINS="*"`
 
 ## Running the Service
 
@@ -101,6 +106,9 @@ Here’s how to set it up:
           # GEOIP_DB_PATH is already set to /geoipdb/GeoLite2-City.mmdb in the Dockerfile
           # LISTEN_ADDR can be overridden here if needed, e.g., - LISTEN_ADDR=:9000
           - LISTEN_ADDR=:8080
+          # ALLOWED_CORS_ORIGINS can be set here to configure allowed origins for CORS
+          # Example: - ALLOWED_CORS_ORIGINS=http://localhost:3000,https://your.frontend.app
+          # Example to allow all: - ALLOWED_CORS_ORIGINS=*
         # Add healthcheck if desired
         # healthcheck:
         #   test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]

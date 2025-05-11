@@ -22,8 +22,9 @@ var geoDB *geoip2.Reader
 
 // Config holds application configuration.
 type Config struct {
-	GeoIPDBPath string
-	ListenAddr  string
+	GeoIPDBPath              string
+	ListenAddr               string
+	AllowedCORSAccessOrigins []string
 }
 
 // AppError represents a structured error response.
@@ -71,10 +72,81 @@ func loadConfig() (Config, error) {
 		log.Printf("Using GeoIP database path from GEOIP_DB_PATH: %s", dbPath)
 	}
 
+	allowedOriginsEnv := os.Getenv("ALLOWED_CORS_ORIGINS")
+	var allowedOriginsList []string
+	if allowedOriginsEnv != "" {
+		allowedOriginsList = strings.Split(allowedOriginsEnv, ",")
+		for i, origin := range allowedOriginsList {
+			allowedOriginsList[i] = strings.TrimSpace(origin)
+		}
+		log.Printf("Allowed CORS origins: %v", allowedOriginsList)
+	} else {
+		log.Println("ALLOWED_CORS_ORIGINS not set. CORS headers will not be added.")
+	}
+
 	return Config{
-		GeoIPDBPath: dbPath,
-		ListenAddr:  listenAddr,
+		GeoIPDBPath:              dbPath,
+		ListenAddr:               listenAddr,
+		AllowedCORSAccessOrigins: allowedOriginsList,
 	}, nil
+}
+
+// corsMiddleware handles CORS headers for incoming requests.
+func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestOrigin := r.Header.Get("Origin")
+		isAllowed := false
+
+		if len(allowedOrigins) == 0 || requestOrigin == "" {
+			// If no origins configured or no Origin header, proceed without CORS headers
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check if wildcard '*' is configured
+		hasWildcard := false
+		for _, configuredOrigin := range allowedOrigins {
+			if configuredOrigin == "*" {
+				hasWildcard = true
+				break
+			}
+		}
+
+		if hasWildcard {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			isAllowed = true
+		} else {
+			for _, configuredOrigin := range allowedOrigins {
+				if configuredOrigin == requestOrigin {
+					w.Header().Set("Access-Control-Allow-Origin", requestOrigin)
+					w.Header().Add("Vary", "Origin") // Important for caching proxies
+					isAllowed = true
+					break
+				}
+			}
+		}
+
+		if isAllowed {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With")
+			// Only set Allow-Credentials if not using wildcard for origin, as per spec
+			if !hasWildcard && requestOrigin != "" {
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+			}
+
+
+			// Handle preflight OPTIONS requests
+			if r.Method == http.MethodOptions {
+				w.Header().Set("Access-Control-Max-Age", "86400") // Cache preflight for 1 day
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+
+		// If origin is not allowed and it's a preflight, the browser will block it.
+		// For actual requests, if not allowed, no CORS headers are set, and browser blocks.
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeJSONError(w http.ResponseWriter, message string, code int) {
@@ -230,7 +302,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           mux,
+		Handler:           corsMiddleware(mux, cfg.AllowedCORSAccessOrigins), // Apply CORS middleware
 		ReadTimeout:       5 * time.Second,
 		WriteTimeout:      10 * time.Second,
 		IdleTimeout:       120 * time.Second,
