@@ -93,6 +93,21 @@ func healthzHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+	// Prevent non-root paths from being handled here if mux is configured loosely
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	response := map[string]string{
+		"message":       "Welcome to the IP Lookup Service. Please use the /lookup endpoint to find GeoIP information.",
+		"example_usage": "/lookup/8.8.8.8 or /lookup/",
+	}
+	json.NewEncoder(w).Encode(response)
+}
+
 func lookupHandler(w http.ResponseWriter, r *http.Request) {
 	if geoDB == nil {
 		log.Println("Error: GeoIP database is not loaded.")
@@ -106,15 +121,44 @@ func lookupHandler(w http.ResponseWriter, r *http.Request) {
 	if len(pathParts) > 1 && pathParts[1] != "" {
 		ipStr = pathParts[1]
 	} else {
-		remoteAddr := r.RemoteAddr
-		host, _, err := net.SplitHostPort(remoteAddr)
-		if err == nil {
-			ipStr = host
-		} else {
-			ipStr = remoteAddr
+		// Try X-Forwarded-For first. This header can contain a comma-separated list of IPs.
+		// The first IP is typically the original client IP.
+		xff := r.Header.Get("X-Forwarded-For")
+		if xff != "" {
+			ips := strings.Split(xff, ",")
+			// Trim whitespace from the first IP in the list.
+			firstIP := strings.TrimSpace(ips[0])
+			if firstIP != "" {
+				ipStr = firstIP
+			}
 		}
+
+		// If X-Forwarded-For is not present or didn't yield an IP, try X-Real-IP.
+		// X-Real-IP usually contains a single IP, the original client IP.
+		if ipStr == "" {
+			xri := r.Header.Get("X-Real-IP")
+			if xri != "" {
+				ipStr = strings.TrimSpace(xri)
+			}
+		}
+
+		// Fallback to RemoteAddr if the headers are not present or did not provide an IP.
+		// This is less likely when behind a properly configured proxy.
+		if ipStr == "" {
+			remoteAddr := r.RemoteAddr
+			host, _, err := net.SplitHostPort(remoteAddr)
+			if err == nil {
+				ipStr = host
+			} else {
+				// If SplitHostPort fails (e.g., for Unix domain sockets or non-standard formats),
+				// use RemoteAddr directly.
+				ipStr = remoteAddr
+			}
+		}
+
+		// Log if the determined IP is local, as GeoIP lookup might be limited.
 		if ipStr == "::1" || ipStr == "127.0.0.1" {
-			log.Printf("Request IP is local (%s). GeoIP lookup might return limited or no data.", ipStr)
+			log.Printf("Request IP is local (%s) after checking proxy headers. GeoIP lookup might return limited or no data.", ipStr)
 		}
 	}
 
@@ -180,6 +224,7 @@ func main() {
 	log.Println("GeoIP database loaded successfully.")
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", rootHandler) // Handle the root path
 	mux.HandleFunc("/lookup/", lookupHandler)
 	mux.HandleFunc("/healthz", healthzHandler)
 
